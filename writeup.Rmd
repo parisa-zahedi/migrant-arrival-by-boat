@@ -1,0 +1,42 @@
+---
+title: "Test123"
+date: "`r Sys.Date()`"
+author: "Parisa Zahedi, Jasper Ginn & Arvid Halma"
+github-repo: "LU-C4i/refugee_prediction"
+contact: true
+organisation: true
+logo: "cfilogo.png"
+output:
+  rmdformats::readthedown:
+    highlight: kate
+---
+
+```{r knitr_init, echo=FALSE, cache=FALSE}
+library(knitr)
+library(rmdformats)
+
+## Global options
+options(max.print="75")
+opts_chunk$set(echo=FALSE,
+	             cache=TRUE,
+               prompt=FALSE,
+               tidy=TRUE,
+               comment=NA,
+               message=FALSE,
+               warning=FALSE)
+opts_knit$set(width=75)
+```
+
+# Test me 
+
+Test123
+
+## I am testing 1
+
+Hahahaha
+
+### Testing 3.3
+
+# Second test
+
+# Third test
