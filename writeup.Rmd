@@ -400,7 +400,7 @@ In Generalized Additive Model (GAM) which is an extension to linear models, pred
  
  We applied GAM on the variables chosen by Lasso-model and the following is the summary of our model.
 
-```{r, results='hide', message=FALSE}
+```{r, results='hide', message=FALSE, echo=FALSE}
 #visibility1
 model <- vector(mode="list", length=5)
 for(i in 1:5){
@@ -481,7 +481,13 @@ gam.m6.ns<-lm(sm.Arrivals~ windSpeed1 +moonPhase1 +visibility1+apparentTemperatu
 gam.m7.ns<-lm(sm.Arrivals~ ns(apparentTemperatureMin1,2)+windSpeed1 +moonPhase1 +visibility1+iconpartlyCloudyNight+humidity1 +cloudCover1,data=libya.data.with.dummy2[,lasso.variables])
 
 anova(gam.m1.ns,gam.m2.ns,gam.m3.ns,gam.m4.ns,gam.m5.ns,gam.m6.ns,gam.m7.ns,test="F")
-pred.val2 <- predict(gam.m2.ns,libya.data.with.dummy2[,lasso.variables])
+
+library('DAAG')
+set.seed(1)
+cv <- cv.lm(data = libya.data.with.dummy2[,lasso.variables], gam.m2.ns, m=10, plotit = FALSE)
+pred.val2 <- cv$cvpred
+    
+#pred.val2 <- predict(gam.m2.ns,libya.data.with.dummy2[,lasso.variables])
 ```
 
 ```{r, echo=FALSE}
@@ -490,7 +496,287 @@ par(mfrow=c(2,4))
 plot.gam(gam.m2.ns,se=TRUE, col="blue")
 ```
 
-This model causes a noticable improvement in RMSE `r round(sqrt(mean((libya.data.with.dummy2[,'sm.Arrivals'] - pred.val2)^2)), digits=3)` 
+This model causes an improvement in RMSE `r round(sqrt(mean((libya.data.with.dummy2[,'sm.Arrivals'] - pred.val2)^2)), digits=3)` 
+
+###8.4.1. Arrivals per months- GAM model v.s. historical data model 
+Here we compare our GAM model to a naive approach of prediction based on monthly arrivals in previous years.
+
+
+The following show a comparison between our GAM model and a historical data model in terms of RMSE as well as prediction of the number of arrivals.
+
+As you can see in these figures, GAM model works better than model of historical data. The only exception is in  *September* data in which GAM model behaves poorly. It could be becauese of a very limited amount of data available for this month. 
+
+ 
+```{r, echo=FALSE, message=FALSE, warning=FALSE, results="hide"}
+
+##Seasonal Prediction
+#1. Predict number of arrivals per month based on number of arrivals / last year
+#2. Apply linear model on each month and compare it with result of step 1.
+
+aggregated.data <-read.csv2('data/aggregated.csv',sep = ',')
+aggregated.data<- aggregated.data[,-1]
+
+libya.data.with.dummy2$Date<- as.Date(libya.data.with.dummy2$Date, format='%Y-%m-%d')
+
+libya.data.with.dummy2$month<- format(libya.data.with.dummy2$Date,'%b')
+libya.data.with.dummy2$year<- format(libya.data.with.dummy2$Date,'%Y')
+
+libya.data.with.dummy2$month<-factor(libya.data.with.dummy2$month, levels=c('Jan',   'Feb',   'Mar',    'Apr',    'May',    'Jun',    'Jul',    'Aug',    'Sep',    'Oct',   'Nov',   'Dec'))
+
+##This function makes a prediction based on the avarage of arrivals from the same month in last years
+avg.predict.per.day <- function(aggdata, month, year){
+  cond<- (aggdata$month==month)&(aggdata$year<year)
+  
+months30 <- c('Apr','Jun','Sep','Nov')
+ 
+if (month %in% months30){
+    avg.pred <- round(mean(aggdata[cond,'arrivals'])/30)
+  
+  }else if (month== 'Feb'){
+      avg.pred <- round(mean(aggdata[cond,'arrivals'])/28)
+  }else{
+      avg.pred <- round(mean(aggdata[cond,'arrivals'])/31)
+  }
+  
+  return (avg.pred)
+}
+
+
+####RMSE of average model
+## We had to remove about 1/10th of observations from our dataset that includes arrivals per day. Because those rows do not have some weather data. For example, Jan 2016 may have 20 rows instead of 31 rows. To compare this dataset with aggregated data from 2014 and 2015, we calcualted the average of arrivals per day in aggregated data and then multiplied the results to the number of days available in the same monnth in the other dataset. For example, assume the average number of arrivals in Jan 2014 and 2015 is 80 persons/ day. Then we predict in Jan 2016, the number of arrivals is 80*20=1600.   
+avg.rmse <- function(data, month, agg.data){
+  cond <- data$month==month
+  data <- data[cond,]
+
+  year <- 2016
+  if (month %in% c('Oct','Nov','Dec')){
+    year <- 2015
+  }
+
+  arr.per.day <- avg.predict.per.day(agg.data,month,year)
+  pred.val <- rep(arr.per.day,nrow(data))
+  arrival.month <- sum(pred.val)
+  rmse<- sqrt(mean((data[,'Arrivals.to.Italy'] - pred.val)^2))
+  return (list(rmse,arrival.month))
+}
+
+####RMSE for the given month based on gam model
+gam.rmse <- function(data, month){ 
+  cond <- data$month==month
+  data <- data[cond,]
+  
+  library(gam)
+  ############# alt 1 ===> Data split : This solution does not have good results since our data is very limited
+  # set.seed(1)
+  # train.index<- sample(nrow(data),0.7*nrow(data))
+  
+  # gam.fit<-lm(sm.Arrivals~ns(apparentTemperatureMin1,3)+ ns(cloudCover1 ,2)+ns(windSpeed1 ,2)+ns(moonPhase1 ,3)+visibility1+iconpartlyCloudyNight+humidity1 ,
+  #             data=data[train.index,])
+   
+  # pred.val <- predict(gam.fit,data[-train.index,])
+  # rmse <- sqrt(mean((data[-train.index,'sm.Arrivals'] - pred.val)^2))
+
+  ########## alt2 ========> using cross validation- 10-fold
+  gam.fit<-lm(sm.Arrivals~ns(apparentTemperatureMin1,3)+ ns(cloudCover1 ,2)+ns(windSpeed1 ,2)+ns(moonPhase1 ,3)+visibility1+iconpartlyCloudyNight+humidity1 ,
+               data=data)
+
+  library('DAAG')
+  set.seed(1)
+  cv <- cv.lm(data = data, gam.fit, m=10, plotit = FALSE)
+  pred.val <- cv$cvpred
+  arrival.month <- sum(pred.val)
+  rmse <- sqrt(mean((data[,'sm.Arrivals'] - pred.val)^2))
+  
+  return(list(rmse,arrival.month))
+}
+
+avg.rmse.res <- rep(0,12)
+gam.rmse.res <- rep(0,12)
+gam.arrivals <- rep(0,12)
+avg.arrivals <- rep(0,12)
+
+#================Oct
+month<-'Oct'
+out<-avg.rmse(libya.data.with.dummy2, month, aggregated.data)
+avg.rmse.res[1]<- out[[1]]
+avg.arrivals[1]<- out[[2]]
+
+out <-gam.rmse(libya.data.with.dummy2, month)
+gam.rmse.res[1]<- out[[1]]
+gam.arrivals[1]<- out[[2]]
+#================Nov
+month<-'Nov'
+out<-avg.rmse(libya.data.with.dummy2, month, aggregated.data)
+avg.rmse.res[2]<- out[[1]]
+avg.arrivals[2]<- out[[2]]
+
+out <-gam.rmse(libya.data.with.dummy2, month)
+gam.rmse.res[2]<- out[[1]]
+gam.arrivals[2]<- out[[2]]
+#================Dec
+month<-'Dec'
+out<-avg.rmse(libya.data.with.dummy2, month, aggregated.data)
+avg.rmse.res[3]<- out[[1]]
+avg.arrivals[3]<- out[[2]]
+
+out <-gam.rmse(libya.data.with.dummy2, month)
+gam.rmse.res[3]<- out[[1]]
+gam.arrivals[3]<- out[[2]]
+#================Jan
+month<-'Jan'
+out<-avg.rmse(libya.data.with.dummy2, month, aggregated.data)
+avg.rmse.res[4]<- out[[1]]
+avg.arrivals[4]<- out[[2]]
+
+out <-gam.rmse(libya.data.with.dummy2, month)
+gam.rmse.res[4]<- out[[1]]
+gam.arrivals[4]<- out[[2]]
+
+#================Feb
+month<-'Feb'
+out<-avg.rmse(libya.data.with.dummy2, month, aggregated.data)
+avg.rmse.res[5]<- out[[1]]
+avg.arrivals[5]<- out[[2]]
+
+out <-gam.rmse(libya.data.with.dummy2, month)
+gam.rmse.res[5]<- out[[1]]
+gam.arrivals[5]<- out[[2]]
+#================Mar
+month<-'Mar'
+out<-avg.rmse(libya.data.with.dummy2, month, aggregated.data)
+avg.rmse.res[6]<- out[[1]]
+avg.arrivals[6]<- out[[2]]
+
+out <-gam.rmse(libya.data.with.dummy2, month)
+gam.rmse.res[6]<- out[[1]]
+gam.arrivals[6]<- out[[2]]
+#================Apr
+month<-'Apr'
+out<-avg.rmse(libya.data.with.dummy2, month, aggregated.data)
+avg.rmse.res[7]<- out[[1]]
+avg.arrivals[7]<- out[[2]]
+
+out <-gam.rmse(libya.data.with.dummy2, month)
+gam.rmse.res[7]<- out[[1]]
+gam.arrivals[7]<- out[[2]]
+#================May
+month<-'May'
+out<-avg.rmse(libya.data.with.dummy2, month, aggregated.data)
+avg.rmse.res[8]<- out[[1]]
+avg.arrivals[8]<- out[[2]]
+
+out <-gam.rmse(libya.data.with.dummy2, month)
+gam.rmse.res[8]<- out[[1]]
+gam.arrivals[8]<- out[[2]]
+#================Jun
+month<-'Jun'
+out<-avg.rmse(libya.data.with.dummy2, month, aggregated.data)
+avg.rmse.res[9]<- out[[1]]
+avg.arrivals[9]<- out[[2]]
+
+out <-gam.rmse(libya.data.with.dummy2, month)
+gam.rmse.res[9]<- out[[1]]
+gam.arrivals[9]<- out[[2]]
+#================Jul
+month<-'Jul'
+out<-avg.rmse(libya.data.with.dummy2, month, aggregated.data)
+avg.rmse.res[10]<- out[[1]]
+avg.arrivals[10]<- out[[2]]
+
+out <-gam.rmse(libya.data.with.dummy2, month)
+gam.rmse.res[10]<- out[[1]]
+gam.arrivals[10]<- out[[2]]
+#================Aug
+month<-'Aug'
+out<-avg.rmse(libya.data.with.dummy2, month, aggregated.data)
+avg.rmse.res[11]<- out[[1]]
+avg.arrivals[11]<- out[[2]]
+
+out <-gam.rmse(libya.data.with.dummy2, month)
+gam.rmse.res[11]<- out[[1]]
+gam.arrivals[11]<- out[[2]]
+#================Sep
+#We excluded Sep from our dataset since gam model was acting strange on those data compared to other months.
+month<-'Sep'
+out<-avg.rmse(libya.data.with.dummy2, month, aggregated.data)
+
+avg.rmse.res[12]<- out[[1]]
+avg.arrivals[12]<- out[[2]]
+
+out <-gam.rmse(libya.data.with.dummy2, month)
+gam.rmse.res[12]<- out[[1]]
+gam.arrivals[12]<- out[[2]]
+
+```
+
+```{r, echo=FALSE, message=FALSE}
+months<- c('Oct',   'Nov',   'Dec','Jan',   'Feb',   'Mar',    'Apr',    'May',    'Jun',    'Jul',    'Aug',    'Sep')
+months <- factor(months, levels =c('Oct',   'Nov',   'Dec','Jan',   'Feb',   'Mar',    'Apr',    'May',    'Jun',    'Jul',    'Aug',    'Sep'))
+
+
+library(ggplot2)
+library(reshape2)
+
+df <- data.frame(months,avg.rmse.res,gam.rmse.res)
+colnames(df) <- c('months','historical data model','GAM model')
+df2<- melt(data = df, id.vars = 'months')
+
+
+p1<- ggplot(df2, aes(months,value, colour = variable)) + geom_line(aes(group=variable)) +geom_point()+ylab('Root Mean Square Error')+ggtitle('RMSE per month- GAM model v.s. historical data model')
+
+avg.rmse.res[12]<- 0
+gam.rmse.res[12]<- 0
+
+df <- data.frame(months,avg.rmse.res,gam.rmse.res)
+colnames(df) <- c('months','historical data model','GAM model')
+df2<- melt(data = df, id.vars = 'months')
+
+p2<-ggplot(df2, aes(months,value, colour = variable)) + geom_line(aes(group=variable)) +geom_point()+ylab('Root Mean Square Error')+ggtitle('RMSE per month- without September data')
+
+
+library('gridExtra')
+grid.arrange(p1,p2,nrow=2)
+##################Arrivals
+
+libya.data.with.dummy2$month<- factor(libya.data.with.dummy2$month, levels = c('Oct',   'Nov',   'Dec','Jan',   'Feb',   'Mar',    'Apr',    'May',    'Jun',    'Jul',    'Aug',    'Sep'))
+
+arrivals <- aggregate(libya.data.with.dummy2$Arrivals.to.Italy, by=list(libya.data.with.dummy2$month), FUN= sum, na.rm=TRUE)
+colnames(arrivals) <- c("months","arrivals")
+
+df.arrivals <- cbind(arrivals, avg.arrivals,gam.arrivals)
+colnames(df.arrivals) <- c('months','actual arrivals','pred by historical data model','pred by GAM model')
+df2.arrivals<- melt(data = df.arrivals, id.vars = 'months')
+
+
+p1<- ggplot(df2.arrivals, aes(months,value, colour = variable)) + geom_line(aes(group=variable)) +geom_point()+ylab('Arrivals')+ggtitle('Prediction of the number of arrivals- GAM model v.s. historical data model')
+
+avg.arrivals[12]<- 0
+gam.arrivals[12]<- 0
+
+df.arrivals <- cbind(arrivals, avg.arrivals,gam.arrivals)
+colnames(df.arrivals) <- c('months','actual arrivals','pred by historical data model','pred by GAM model')
+df2.arrivals<- melt(data = df.arrivals, id.vars = 'months')
+
+# plot, using the aesthetics argument 'colour'
+p2<- ggplot(df2.arrivals, aes(months,value, colour = variable)) + geom_line(aes(group=variable)) +geom_point()+ylab('Arrivals')+ggtitle('Prediction of the number of arrivals- without September data')
+
+grid.arrange(p1,p2,nrow=2)
+
+```
+
+
+```{r, echo=FALSE, message=FALSE, results='hide', warning=FALSE}
+cond.no.Sep <-libya.data.with.dummy2$month != 'Sep' 
+gam.m2.ns<-lm(sm.Arrivals~ns(apparentTemperatureMin1,3)+ ns(cloudCover1 ,2)+ns(windSpeed1 ,2)+ns(moonPhase1 ,3)+visibility1+iconpartlyCloudyNight+humidity1 ,data=libya.data.with.dummy2[cond.no.Sep,lasso.variables])
+
+set.seed(1)
+cv <- cv.lm(data = libya.data.with.dummy2[cond.no.Sep,lasso.variables], gam.m2.ns, m=10, plotit = FALSE)
+pred.val2 <- cv$cvpred
+
+#pred.val2 <- predict(gam.m2.ns,libya.data.with.dummy2[cond.no.Sep,lasso.variables])
+```
+
+Considering a very high RMSE in September data, we improved our model by removing those data. (RMSE = `r round(sqrt(mean((libya.data.with.dummy2[cond.no.Sep,'sm.Arrivals'] - pred.val2)^2)), digits=3)` )
 
 
 #9. Conclusion
@@ -500,7 +786,7 @@ This process includes a comparison among different simple linear models created 
 
 As a reslut of this project we gained a better understanding of UNHCR refugee arrival data and its quality. One of the main features of this data is existing a large number of zeros which was considered as valid data points. We address this challange by using smoothing methods. 
 
-Our analysis shows a strong relationship between the number of arrivals to Italy and some of weather parameters including minimum apparant temperature, moon phase, wind speed, visibili, and cloud cover (p-value: < 2.2e-16). However, in its current form, this model is not robust enough in prediction (RMSE 402.657). 
+Our analysis shows a strong relationship between the number of arrivals to Italy and some of weather parameters including minimum apparant temperature, moon phase, wind speed, visibili, and cloud cover (p-value: < 2.2e-16). However, in its current form, this model is not robust enough in prediction  (RMSE = `r round(sqrt(mean((libya.data.with.dummy2[cond.no.Sep,'sm.Arrivals'] - pred.val2)^2)), digits=3)`). 
 
 This model is made based on weather conditions in Tripoli,Libya with assumption of 3-day sea trip. To improve this model we need to gather data from different coastal migrant hubs for different lenghts of travel. We can also apply more sophisticated methods such as Random Forest for prediction purposes.
   

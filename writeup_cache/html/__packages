@@ -1,0 +1,17 @@
+base
+knitr
+rmdformats
+ggplot2
+RColorBrewer
+boot
+cluster
+gclus
+Matrix
+foreach
+glmnet
+TTR
+gam
+lattice
+DAAG
+reshape2
+gridExtra
